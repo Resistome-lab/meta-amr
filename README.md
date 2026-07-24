@@ -1,6 +1,6 @@
 # meta-amr
 
-> An automated CLI pipeline for downloading SRA metagenomic datasets, performing host-filtering/reference alignments, and quantifying AMR gene abundances using CARD and DIAMOND.
+> An automated Command-Line Interface (CLI) pipeline for downloading SRA metagenomic datasets, performing host-filtering/reference alignments, and quantifying AMR gene abundances using the Comprehensive Antibiotic Resistance Database (CARD) and `DIAMOND`.
 
 ---
 
@@ -37,8 +37,9 @@ Run `meta-amr` from **any directory** on your machine:
  meta-amr -s SRR39779725 -d ~/CARD_indexed.dmnd -t 8
 ```
 "SRR39779725" was picked as a real SRA for validation.
+"CARD_indexed.dmnd" is the pre-indexed database built from the CARD protein sequences using `diamond makedb`.
 
-### CLI Options
+### Command-Line Interface (CLI) Options
 
 ```text
   -s  SRA accession number (Required, e.g., SRR39779725)
