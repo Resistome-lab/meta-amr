@@ -1,0 +1,12 @@
+# Ignore temporary pipeline outputs
+*.sam
+*.bam
+*.bai
+*.fq.gz
+*.fastq.gz
+fastq/
+SRR*/
+*.m8
+gene_counts.txt
+unique_gene_sums.txt
+
