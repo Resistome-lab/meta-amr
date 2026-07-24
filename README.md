@@ -1,6 +1,6 @@
 # meta-amr
 
-> An automated Command-Line Interface (CLI) pipeline for downloading SRA metagenomic datasets, performing host-filtering/reference alignments, and quantifying AMR gene abundances using the Comprehensive Antibiotic Resistance Database (CARD) and `DIAMOND`.
+> An automated Command-Line Interface (CLI) pipeline for downloading SRA metagenomic datasets and quantifying AMR gene abundances using the Comprehensive Antibiotic Resistance Database (CARD) and `DIAMOND`.
 
 ---
 
