@@ -78,7 +78,7 @@ echo " Database: ${CARD_DB}"
 echo " Output Dir: $(pwd)"
 echo "=================================================="
 
-# Step 1: Fetch raw data directly into the active working directory
+# Step 1: Fetch raw data directly into active working directory
 echo "[1/7] Downloading SRA accession (${SRR_ID})..."
 prefetch "${SRR_ID}" --output-directory .
 
@@ -88,7 +88,6 @@ mkdir -p fastq_tmp
 
 SRA_FILE="${SRR_ID}/${SRR_ID}.sra"
 
-# Fallback to pure accession string if the .sra file isn't in a subfolder
 if [ ! -f "${SRA_FILE}" ]; then
     SRA_FILE="${SRR_ID}"
 fi
