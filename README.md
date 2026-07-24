@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/Resistome-lab/meta-amr/main/install
 Run `meta-amr` from **any directory** on your machine:
 
 ```bash
-meta-amr -s SRR39712008 -d ~/CARD_protein_indexed.dmnd -t 12
+meta-amr -s SRR39712008 -d ~/CARD_protein_indexed.dmnd -t 8
 ```
 
 ### CLI Options
