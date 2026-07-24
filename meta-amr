@@ -1,10 +1,96 @@
+#!/usr/bin/env bash
+
+# Exit immediately if a command exits with a non-zero status
+set -euo pipefail
+
+# --- Default Parameters ---
+THREADS=8
+CARD_DB="$HOME/CARD"
+SRR_ID=""
+OUTPUT_DIR="meta_amr_output"
+
+# --- Helper Functions ---
+usage() {
+    cat << EOF
+Usage: meta-amr -s <SRR_ACCESSION> [-d <CARD_DB_PATH>] [-t <THREADS>] [-o <OUTPUT_DIR>]
+
+An automated CLI pipeline for downloading SRA metagenomic datasets, 
+aligning against reference genomes, and quantifying AMR gene abundances using CARD and DIAMOND.
+
+Options:
+  -s  SRA accession number (Required, e.g., SRR39712008)
+  -d  Path to DIAMOND CARD database (Default: ~/CARD)
+  -t  Number of CPU threads (Default: 8)
+  -o  Output directory path (Default: meta_amr_output)
+  -h  Display this help message and exit
+EOF
+    exit 1
+}
+
+# --- Check Mandatory Dependencies ---
+check_dependencies() {
+    local deps=("prefetch" "reformat.sh" "bowtie2" "samtools" "bedtools" "diamond" "awk")
+    for tool in "${deps[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            echo "[ERROR] Required dependency '$tool' is not installed or not in PATH." >&2
+            exit 1
+        fi
+    done
+
+    if ! command -v fasterq-dump &> /dev/null && ! command -v fastq-dump &> /dev/null; then
+        echo "[ERROR] Neither fasterq-dump nor fastq-dump was found in PATH." >&2
+        exit 1
+    fi
+}
+
+# --- Parse Command Line Arguments ---
+while getopts "s:d:t:o:h" opt; do
+  case ${opt} in
+    s ) SRR_ID="$OPTARG" ;;
+    d ) CARD_DB="$OPTARG" ;;
+    t ) THREADS="$OPTARG" ;;
+    o ) OUTPUT_DIR="$OPTARG" ;;
+    h ) usage ;;
+    \? ) usage ;;
+  esac
+done
+
+if [ -z "$SRR_ID" ]; then
+    echo "[ERROR] Option -s <SRR_ACCESSION> is required." >&2
+    usage
+fi
+
+# Validate threads parameter
+if ! [[ "$THREADS" =~ ^[0-9]+$ ]]; then
+    THREADS=8
+fi
+
+# --- Main Execution Flow ---
+check_dependencies
+
+mkdir -p "${OUTPUT_DIR}"
+cd "${OUTPUT_DIR}"
+
+echo "=================================================="
+echo " Starting Meta-AMR Pipeline for: ${SRR_ID}"
+echo " Threads: ${THREADS}"
+echo " Database: ${CARD_DB}"
+echo " Output Dir: ${OUTPUT_DIR}"
+echo "=================================================="
+
+# Step 1: Fetch raw data
+echo "[1/7] Downloading SRA accession (${SRR_ID})..."
+prefetch "${SRR_ID}"
+
 # Step 2: Convert SRA to FASTQ
-echo "[2/7] Extracting FASTQ files with fasterq-dump..."
+echo "[2/7] Extracting FASTQ files..."
 mkdir -p fastq_tmp
 
-# Use fasterq-dump (or fastq-dump without forced compression to avoid suffix mismatches)
-fasterq-dump --outdir fastq_tmp --split-files --threads "${THREADS}" "${SRR_ID}/${SRR_ID}.sra" || \
-fastq-dump --outdir fastq_tmp --split-files "${SRR_ID}/${SRR_ID}.sra"
+if command -v fasterq-dump &> /dev/null; then
+    fasterq-dump "${SRR_ID}" --outdir fastq_tmp --split-files -e "${THREADS}" -p
+else
+    fastq-dump "${SRR_ID}" --outdir fastq_tmp --split-files
+fi
 
 # Step 3: Check for paired vs single end and interleave
 echo "[3/7] Processing extracted FASTQ files..."
@@ -23,3 +109,50 @@ else
     echo "[ERROR] FASTQ extraction failed to produce valid read files!" >&2
     exit 1
 fi
+
+# Step 4: Bowtie2 Alignment
+echo "[4/7] Aligning interleaved reads with Bowtie2..."
+bowtie2 -x reference_index -U "interleaved_${SRR_ID}.fq.gz" -S "aligned_${SRR_ID}.sam" -p "${THREADS}"
+
+# Step 5: SAM/BAM Processing
+echo "[5/7] Sorting SAM and converting to BAM..."
+samtools view -bS "aligned_${SRR_ID}.sam" | samtools sort - -o "sorted_${SRR_ID}.bam" -@ "${THREADS}"
+samtools index "sorted_${SRR_ID}.bam"
+
+# Step 6: Extract aligned reads to FASTQ
+echo "[6/7] Extracting aligned host-filtered reads from BAM..."
+bedtools bamtofastq -i "sorted_${SRR_ID}.bam" -fq "sorted_${SRR_ID}.fastq.gz"
+
+# Step 7: DIAMOND Search & Gene Counting
+echo "[7/7] Profiling AMR target genes using DIAMOND & AWK..."
+blast_results="diamond_${SRR_ID}.m8"
+AWK_results="awk_diamond_${SRR_ID}.tsv"
+
+diamond blastx -d "${CARD_DB}" -q "sorted_${SRR_ID}.fastq.gz" -o "${blast_results}" -k 1 -f 6 -p "${THREADS}"
+
+awk 'BEGIN { 
+    OFS="\t"; 
+    print "Query ID\tSubject ID\tPercentage of identical matches\tAlignment length\tNumber of mismatches\tNumber of gap openings\tStart of alignment in query\tEnd of alignment in query\tStart of alignment in subject\tEnd of alignment in subject\tExpected value\tBit score\tGene_Count" 
+} 
+{ 
+    gsub(/.*ARO_Name:/, "", $2); 
+    gsub(/\|.*/, "", $2); 
+    gene_count[$2]++ 
+} 
+END { 
+    for (gene in gene_count) { 
+        print gene, gene_count[gene]; 
+        total_count += gene_count[gene] 
+    } 
+    print "Total_Count\t\t\t\t\t\t\t\t\t\t\t\t\t", total_count > "gene_counts.txt"; 
+    for (gene in gene_count) { 
+        print gene, gene_count[gene] > "unique_gene_sums.txt" 
+    } 
+} 
+{ print $0 "\t" gene_count[$2] }' "${blast_results}" > "${AWK_results}"
+
+echo "=================================================="
+echo " Pipeline Finished Successfully!"
+echo " Results Summary: ${OUTPUT_DIR}/${AWK_results}"
+echo " Unique Gene Counts: ${OUTPUT_DIR}/unique_gene_sums.txt"
+echo "=================================================="
