@@ -3,9 +3,6 @@
 # Exit immediately if a command exits with a non-zero status
 set -euo pipefail
 
-# Store original execution directory before moving around
-ORIG_DIR="$(pwd)"
-
 # --- Default Parameters ---
 THREADS=8
 CARD_DB="$HOME/CARD"
@@ -81,30 +78,25 @@ echo " Database: ${CARD_DB}"
 echo " Output Dir: $(pwd)"
 echo "=================================================="
 
-# Step 1: Fetch raw data
+# Step 1: Fetch raw data directly into the active working directory
 echo "[1/7] Downloading SRA accession (${SRR_ID})..."
-prefetch "${SRR_ID}"
-
-# Locate the SRA file across common download paths
-SRA_PATH=""
-if [ -f "${SRR_ID}/${SRR_ID}.sra" ]; then
-    SRA_PATH="${SRR_ID}/${SRR_ID}.sra"
-elif [ -f "${ORIG_DIR}/${SRR_ID}/${SRR_ID}.sra" ]; then
-    SRA_PATH="${ORIG_DIR}/${SRR_ID}/${SRR_ID}.sra"
-elif [ -f "$HOME/ncbi/public/sra/${SRR_ID}.sra" ]; then
-    SRA_PATH="$HOME/ncbi/public/sra/${SRR_ID}.sra"
-else
-    SRA_PATH="${SRR_ID}"
-fi
+prefetch "${SRR_ID}" --output-directory .
 
 # Step 2: Convert SRA to FASTQ
-echo "[2/7] Extracting FASTQ files from ${SRA_PATH}..."
+echo "[2/7] Extracting FASTQ files for ${SRR_ID}..."
 mkdir -p fastq_tmp
 
+SRA_FILE="${SRR_ID}/${SRR_ID}.sra"
+
+# Fallback to pure accession string if the .sra file isn't in a subfolder
+if [ ! -f "${SRA_FILE}" ]; then
+    SRA_FILE="${SRR_ID}"
+fi
+
 if command -v fasterq-dump &> /dev/null; then
-    fasterq-dump "${SRA_PATH}" --outdir fastq_tmp --split-files -e "${THREADS}" -p
+    fasterq-dump "${SRA_FILE}" --outdir fastq_tmp --split-files --threads "${THREADS}" -p
 else
-    fastq-dump "${SRA_PATH}" --outdir fastq_tmp --split-files
+    fastq-dump "${SRA_FILE}" --outdir fastq_tmp --split-files
 fi
 
 # Step 3: Check for paired vs single end and interleave
