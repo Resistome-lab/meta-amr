@@ -34,13 +34,14 @@ curl -fsSL https://raw.githubusercontent.com/Resistome-lab/meta-amr/main/install
 Run `meta-amr` from **any directory** on your machine:
 
 ```bash
-meta-amr -s SRR39712008 -d ~/CARD_protein_indexed.dmnd -t 8
+ meta-amr -s SRR39779725 -d ~/CARD_indexed.dmnd -t 8
 ```
+"SRR39779725" was picked as a real SRA for validation.
 
 ### CLI Options
 
 ```text
-  -s  SRA accession number (Required, e.g., SRR39712008)
+  -s  SRA accession number (Required, e.g., SRR39779725)
   -d  Path to DIAMOND CARD database (Default: ~/CARD)
   -t  Number of CPU threads (Default: 8)
   -o  Output directory path (Default: meta_amr_output)
