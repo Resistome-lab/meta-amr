@@ -126,13 +126,11 @@ INPUT_FOR_DIAMOND="interleaved_${SRR_ID}.fq.gz"
 if [ -n "${BOWTIE2_INDEX}" ] && [ "${BOWTIE2_INDEX}" != "NONE" ]; then
     echo "[4/7] Aligning interleaved reads with Bowtie2 (${BOWTIE2_INDEX})..."
     
-    # Check if bowtie2 and samtools exist
     if ! command -v bowtie2 &> /dev/null || ! command -v samtools &> /dev/null || ! command -v bedtools &> /dev/null; then
         echo "[ERROR] Host filtering requires bowtie2, samtools, and bedtools to be installed." >&2
         exit 1
     fi
 
-    # Check if index files exist
     if ! ls "${BOWTIE2_INDEX}"*.bt2* &> /dev/null; then
         echo "[ERROR] Bowtie2 index '${BOWTIE2_INDEX}' was not found!" >&2
         exit 1
@@ -163,21 +161,28 @@ awk 'BEGIN {
     print "Query ID\tSubject ID\tPercentage of identical matches\tAlignment length\tNumber of mismatches\tNumber of gap openings\tStart of alignment in query\tEnd of alignment in query\tStart of alignment in subject\tEnd of alignment in subject\tExpected value\tBit score\tGene_Count" 
 } 
 { 
-    gsub(/.*ARO_Name:/, "", $2); 
-    gsub(/\|.*/, "", $2); 
-    gene_count[$2]++ 
+    gene = $2;
+
+    # Extract clean gene name without corrupting original $2 string
+    if (gene ~ /ARO_Name:/) {
+        sub(/.*ARO_Name:/, "", gene);
+        sub(/\|.*/, "", gene);
+    } 
+    else if (gene ~ /\|/) {
+        n = split(gene, parts, "|");
+        gene = parts[n];
+    }
+
+    gene_count[gene]++;
+
+    # Output original fields intact plus gene count
+    print $0, gene_count[gene];
 } 
 END { 
-    for (gene in gene_count) { 
-        print gene, gene_count[gene]; 
-        total_count += gene_count[gene] 
+    for (g in gene_count) { 
+        print g, gene_count[g] > "unique_gene_sums.txt" 
     } 
-    print "Total_Count\t\t\t\t\t\t\t\t\t\t\t\t\t", total_count > "gene_counts.txt"; 
-    for (gene in gene_count) { 
-        print gene, gene_count[gene] > "unique_gene_sums.txt" 
-    } 
-} 
-{ print $0 "\t" gene_count[$2] }' "${blast_results}" > "${AWK_results}"
+}' "${blast_results}" > "${AWK_results}"
 
 echo "=================================================="
 echo " Pipeline Finished Successfully!"
