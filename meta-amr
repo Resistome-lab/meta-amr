@@ -8,18 +8,20 @@ THREADS=8
 CARD_DB="$HOME/CARD"
 SRR_ID=""
 OUTPUT_DIR="meta_amr_output"
+BOWTIE2_INDEX=""
 
 # --- Helper Functions ---
 usage() {
     cat << EOF
-Usage: meta-amr -s <SRR_ACCESSION> [-d <CARD_DB_PATH>] [-t <THREADS>] [-o <OUTPUT_DIR>]
+Usage: meta-amr -s <SRR_ACCESSION> [-d <CARD_DB_PATH>] [-i <BOWTIE2_INDEX>] [-t <THREADS>] [-o <OUTPUT_DIR>]
 
 An automated CLI pipeline for downloading SRA metagenomic datasets, 
 aligning against reference genomes, and quantifying AMR gene abundances using CARD and DIAMOND.
 
 Options:
-  -s  SRA accession number (Required, e.g., SRR39712008)
+  -s  SRA accession number (Required, e.g., SRR39779725)
   -d  Path to DIAMOND CARD database (Default: ~/CARD)
+  -i  Path to Bowtie2 host reference index prefix (Optional; pass "NONE" or skip if no filtering needed)
   -t  Number of CPU threads (Default: 8)
   -o  Output directory path (Default: meta_amr_output)
   -h  Display this help message and exit
@@ -29,7 +31,7 @@ EOF
 
 # --- Check Mandatory Dependencies ---
 check_dependencies() {
-    local deps=("prefetch" "reformat.sh" "bowtie2" "samtools" "bedtools" "diamond" "awk")
+    local deps=("prefetch" "reformat.sh" "diamond" "awk")
     for tool in "${deps[@]}"; do
         if ! command -v "$tool" &> /dev/null; then
             echo "[ERROR] Required dependency '$tool' is not installed or not in PATH." >&2
@@ -44,10 +46,11 @@ check_dependencies() {
 }
 
 # --- Parse Command Line Arguments ---
-while getopts "s:d:t:o:h" opt; do
+while getopts "s:d:i:t:o:h" opt; do
   case ${opt} in
     s ) SRR_ID="$OPTARG" ;;
     d ) CARD_DB="$OPTARG" ;;
+    i ) BOWTIE2_INDEX="$OPTARG" ;;
     t ) THREADS="$OPTARG" ;;
     o ) OUTPUT_DIR="$OPTARG" ;;
     h ) usage ;;
@@ -75,6 +78,7 @@ echo "=================================================="
 echo " Starting Meta-AMR Pipeline for: ${SRR_ID}"
 echo " Threads: ${THREADS}"
 echo " Database: ${CARD_DB}"
+echo " Bowtie2 Index: ${BOWTIE2_INDEX:-None (Direct to DIAMOND)}"
 echo " Output Dir: $(pwd)"
 echo "=================================================="
 
@@ -116,25 +120,43 @@ else
     exit 1
 fi
 
-# Step 4: Bowtie2 Alignment
-echo "[4/7] Aligning interleaved reads with Bowtie2..."
-bowtie2 -x reference_index -U "interleaved_${SRR_ID}.fq.gz" -S "aligned_${SRR_ID}.sam" -p "${THREADS}"
+INPUT_FOR_DIAMOND="interleaved_${SRR_ID}.fq.gz"
 
-# Step 5: SAM/BAM Processing
-echo "[5/7] Sorting SAM and converting to BAM..."
-samtools view -bS "aligned_${SRR_ID}.sam" | samtools sort - -o "sorted_${SRR_ID}.bam" -@ "${THREADS}"
-samtools index "sorted_${SRR_ID}.bam"
+# Step 4, 5, 6: Bowtie2 Host Filtering (Optional)
+if [ -n "${BOWTIE2_INDEX}" ] && [ "${BOWTIE2_INDEX}" != "NONE" ]; then
+    echo "[4/7] Aligning interleaved reads with Bowtie2 (${BOWTIE2_INDEX})..."
+    
+    # Check if bowtie2 and samtools exist
+    if ! command -v bowtie2 &> /dev/null || ! command -v samtools &> /dev/null || ! command -v bedtools &> /dev/null; then
+        echo "[ERROR] Host filtering requires bowtie2, samtools, and bedtools to be installed." >&2
+        exit 1
+    fi
 
-# Step 6: Extract aligned reads to FASTQ
-echo "[6/7] Extracting aligned host-filtered reads from BAM..."
-bedtools bamtofastq -i "sorted_${SRR_ID}.bam" -fq "sorted_${SRR_ID}.fastq.gz"
+    # Check if index files exist
+    if ! ls "${BOWTIE2_INDEX}"*.bt2* &> /dev/null; then
+        echo "[ERROR] Bowtie2 index '${BOWTIE2_INDEX}' was not found!" >&2
+        exit 1
+    fi
+
+    bowtie2 -x "${BOWTIE2_INDEX}" -U "interleaved_${SRR_ID}.fq.gz" -S "aligned_${SRR_ID}.sam" -p "${THREADS}"
+
+    echo "[5/7] Sorting SAM and converting to BAM..."
+    samtools view -bS "aligned_${SRR_ID}.sam" | samtools sort - -o "sorted_${SRR_ID}.bam" -@ "${THREADS}"
+    samtools index "sorted_${SRR_ID}.bam"
+
+    echo "[6/7] Extracting aligned reads to FASTQ..."
+    bedtools bamtofastq -i "sorted_${SRR_ID}.bam" -fq "host_filtered_${SRR_ID}.fastq.gz"
+    INPUT_FOR_DIAMOND="host_filtered_${SRR_ID}.fastq.gz"
+else
+    echo "[4-6/7] Skipping Bowtie2 host alignment. Passing raw interleaved reads directly to DIAMOND."
+fi
 
 # Step 7: DIAMOND Search & Gene Counting
 echo "[7/7] Profiling AMR target genes using DIAMOND & AWK..."
 blast_results="diamond_${SRR_ID}.m8"
 AWK_results="awk_diamond_${SRR_ID}.tsv"
 
-diamond blastx -d "${CARD_DB}" -q "sorted_${SRR_ID}.fastq.gz" -o "${blast_results}" -k 1 -f 6 -p "${THREADS}"
+diamond blastx -d "${CARD_DB}" -q "${INPUT_FOR_DIAMOND}" -o "${blast_results}" -k 1 -f 6 -p "${THREADS}"
 
 awk 'BEGIN { 
     OFS="\t"; 
