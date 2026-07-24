@@ -3,6 +3,9 @@
 # Exit immediately if a command exits with a non-zero status
 set -euo pipefail
 
+# Store original execution directory before moving around
+ORIG_DIR="$(pwd)"
+
 # --- Default Parameters ---
 THREADS=8
 CARD_DB="$HOME/CARD"
@@ -75,21 +78,33 @@ echo "=================================================="
 echo " Starting Meta-AMR Pipeline for: ${SRR_ID}"
 echo " Threads: ${THREADS}"
 echo " Database: ${CARD_DB}"
-echo " Output Dir: ${OUTPUT_DIR}"
+echo " Output Dir: $(pwd)"
 echo "=================================================="
 
 # Step 1: Fetch raw data
 echo "[1/7] Downloading SRA accession (${SRR_ID})..."
 prefetch "${SRR_ID}"
 
+# Locate the SRA file across common download paths
+SRA_PATH=""
+if [ -f "${SRR_ID}/${SRR_ID}.sra" ]; then
+    SRA_PATH="${SRR_ID}/${SRR_ID}.sra"
+elif [ -f "${ORIG_DIR}/${SRR_ID}/${SRR_ID}.sra" ]; then
+    SRA_PATH="${ORIG_DIR}/${SRR_ID}/${SRR_ID}.sra"
+elif [ -f "$HOME/ncbi/public/sra/${SRR_ID}.sra" ]; then
+    SRA_PATH="$HOME/ncbi/public/sra/${SRR_ID}.sra"
+else
+    SRA_PATH="${SRR_ID}"
+fi
+
 # Step 2: Convert SRA to FASTQ
-echo "[2/7] Extracting FASTQ files..."
+echo "[2/7] Extracting FASTQ files from ${SRA_PATH}..."
 mkdir -p fastq_tmp
 
 if command -v fasterq-dump &> /dev/null; then
-    fasterq-dump "${SRR_ID}" --outdir fastq_tmp --split-files -e "${THREADS}" -p
+    fasterq-dump "${SRA_PATH}" --outdir fastq_tmp --split-files -e "${THREADS}" -p
 else
-    fastq-dump "${SRR_ID}" --outdir fastq_tmp --split-files
+    fastq-dump "${SRA_PATH}" --outdir fastq_tmp --split-files
 fi
 
 # Step 3: Check for paired vs single end and interleave
